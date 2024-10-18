@@ -1,0 +1,250 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless application for product availability notifications.
+
+Globals:
+  Function:
+    Runtime: python3.9
+    Timeout: 300
+    Handler: app.lambda_handler
+    Environment:
+      Variables:
+        ENV: dev
+
+Resources:
+
+  # Layers
+  CommonLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: CommonLayer
+      Description: Common utilities for Lambda functions
+      ContentUri: src/layers/common_layer/
+      CompatibleRuntimes:
+        - python3.9
+
+  SeleniumLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: SeleniumLayer
+      Description: Selenium dependencies and chromedriver
+      ContentUri: src/layers/selenium_layer/
+      CompatibleRuntimes:
+        - python3.9
+
+  # UserRequestHandlerFunction
+  UserRequestHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/user_request_handler/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref CommonLayer
+      Environment:
+        Variables:
+          USER_REQUESTS_TABLE: !Ref UserRequestsTable
+      Events:
+        SubmitRequest:
+          Type: Api
+          Properties:
+            Path: /submitanewrequest
+            Method: post
+        ListRequests:
+          Type: Api
+          Properties:
+            Path: /listrequests
+            Method: get
+        DeleteRequest:
+          Type: Api
+          Properties:
+            Path: /deletearequest
+            Method: delete
+        UpdateRequest:
+          Type: Api
+          Properties:
+            Path: /update
+            Method: put
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestsTable
+
+  # ScraperFunction
+  ScraperFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/scraper_function/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref SeleniumLayer
+        - !Ref CommonLayer
+      Environment:
+        Variables:
+          USER_REQUESTS_TABLE: !Ref UserRequestsTable
+          PRODUCT_CATALOG_TABLE: !Ref ProductCatalogTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: '*'
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:CreateTable
+              Resource: '*'
+      Events:
+        ScrapeSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(7 days)
+
+  # IndexerFunction
+  IndexerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/indexer_function/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref CommonLayer
+      Environment:
+        Variables:
+          OPENSEARCH_ENDPOINT: !GetAtt OpenSearchDomain.DomainEndpoint
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'es:ESHttp*'
+              Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${OpenSearchDomain}/*'
+      Events:
+        DynamoDBStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt ProductCatalogTable.StreamArn
+            StartingPosition: LATEST
+
+  # MatcherFunction
+  MatcherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/matcher_function/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref CommonLayer
+      Environment:
+        Variables:
+          USER_REQUESTS_TABLE: !Ref UserRequestsTable
+          OPENSEARCH_ENDPOINT: !GetAtt OpenSearchDomain.DomainEndpoint
+          SNS_TOPIC_ARN: !Ref NotificationsTopic
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserRequestsTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt NotificationsTopic.TopicName
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'es:ESHttp*'
+              Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${OpenSearchDomain}/*'
+      Events:
+        MatchSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 day)
+
+  # DynamoDB Tables
+  UserRequestsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: UserRequests
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: RequestID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: RequestID
+          KeyType: HASH
+
+  ProductCatalogTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ProductCatalog
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: Postcode
+          AttributeType: S
+        - AttributeName: ProductID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: Postcode
+          KeyType: HASH
+        - AttributeName: ProductID
+          KeyType: RANGE
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+
+  # OpenSearch Domain
+  OpenSearchDomain:
+    Type: AWS::Elasticsearch::Domain
+    Properties:
+      DomainName: 'product-catalog-domain'
+      ElasticsearchVersion: '7.10'
+      ElasticsearchClusterConfig:
+        InstanceType: 't3.small.elasticsearch'
+        InstanceCount: 1
+      EBSOptions:
+        EBSEnabled: true
+        VolumeSize: 10
+      AccessPolicies:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: '*'
+            Action: 'es:*'
+            Resource: '*'
+
+  # SNS Topic
+  NotificationsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: UserNotifications
+
+Outputs:
+  ApiUrl:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  CommonLayerVersionArn:
+    Description: "ARN of the Common Layer"
+    Value: !Ref CommonLayer
+  SeleniumLayerVersionArn:
+    Description: "ARN of the Selenium Layer"
+    Value: !Ref SeleniumLayer
+  UserRequestHandlerFunctionArn:
+    Description: "ARN of the UserRequestHandlerFunction"
+    Value: !GetAtt UserRequestHandlerFunction.Arn
+  ScraperFunctionArn:
+    Description: "ARN of the ScraperFunction"
+    Value: !GetAtt ScraperFunction.Arn
+  IndexerFunctionArn:
+    Description: "ARN of the IndexerFunction"
+    Value: !GetAtt IndexerFunction.Arn
+  MatcherFunctionArn:
+    Description: "ARN of the MatcherFunction"
+    Value: !GetAtt MatcherFunction.Arn
+  UserRequestsTableName:
+    Description: "Name of the DynamoDB table for User Requests"
+    Value: !Ref UserRequestsTable
+  ProductCatalogTableName:
+    Description: "Name of the DynamoDB table for Product Catalog"
+    Value: !Ref ProductCatalogTable
+  NotificationsTopicArn:
+    Description: "ARN of the SNS Notifications Topic"
+    Value: !Ref NotificationsTopic
+  OpenSearchDomainEndpoint:
+    Description: "Endpoint of the OpenSearch Domain"
+    Value: !GetAtt OpenSearchDomain.DomainEndpoint
+
