@@ -1,1 +1,72 @@
 a Serverless Backend for Product Availability Notifications
+
+API Gateway: 
+Exposes four endpoints to handle user requests for submitting, listing, updating, and deleting requests.
+
+
+Lambda Functions:
+UserRequestHandler: A single Lambda function that handles all API requests related to user requests (submit, list, update, delete).
+
+ScraperFunction: Scrapes data for each unique postcode and stores it in a corresponding DynamoDB table.
+
+IndexerFunction: Triggered by DynamoDB Streams to index data into OpenSearch.
+
+MatcherFunction: Matches user requests with products in the corresponding postcode's catalog table and sends notifications via SNS.
+
+DynamoDB:
+UserRequestsTable: Stores user requests with a unique RequestID.
+
+ProductCatalogTables: One table per postcode, storing product data for that postcode.
+
+OpenSearch: Used for indexing and searching product data.
+
+SNS: Sends SMS notifications to users when matches are found.
+
+
+```
+project-root/
+├── README.md
+├── requirements.txt
+├── template.yaml                # AWS SAM or CloudFormation template
+├── .gitignore
+├── src/
+│   ├── common/
+│   │   ├── __init__.py
+│   │   └── utils.py
+│   ├── request_handler/
+│   │   ├── app.py
+│   │   └── requirements.txt
+│   ├── scraper_function/
+│   │   ├── app.py
+│   │   ├── selenium_driver/
+│   │   │   └── chromedriver      
+│   │   └── requirements.txt
+│   ├── indexer_function/
+│   │   ├── app.py
+│   │   └── requirements.txt
+│   ├── matcher_function/
+│   │   ├── app.py
+│   │   └── requirements.txt
+├── tests/
+│   ├── unit/
+│   │   ├── __init__.py
+│   │   ├── test_request_handler.py
+│   │   ├── test_scraper_function.py
+│   │   ├── test_indexer_function.py
+│   │   └── test_matcher_function.py
+│   └── integration/
+│       ├── __init__.py
+│       └── test_end_to_end.py
+├── scripts/
+│   ├── deploy.sh
+│   └── build_layer.sh
+├── layers/
+│   └── python/
+│       ├── selenium/             # Additional Python packages for layers
+│       └── opensearch/
+└── config/
+    ├── dev.env
+    ├── prod.env
+    └── logging.conf
+
+```
