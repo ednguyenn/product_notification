@@ -1,0 +1,9 @@
+{
+    "httpMethod": "PUT",
+    "path": "/update",
+    "body": "{\"RequestID\": \"daf82ab1-c420-4ea8-a218-08d81001b4c2\", \"ProductName\": \"New Product Name\", \"Discount\": 30, \"PhoneNumber\": \"0412345678\"}",
+    "headers": {
+      "Content-Type": "application/json"
+    }
+  }
+  

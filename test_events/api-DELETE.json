@@ -1,0 +1,9 @@
+{
+    "httpMethod": "DELETE",
+    "path": "/deletearequest",
+    "body": "{\"RequestID\": \"daf82ab1-c420-4ea8-a218-08d81001b4c2\"}",
+    "headers": {
+      "Content-Type": "application/json"
+    }
+  }
+  

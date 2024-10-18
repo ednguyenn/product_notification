@@ -1,0 +1,183 @@
+Updated Serverless Architecture Design Based on Your Modifications
+
+Given your new requirements and modifications, I'll redesign the serverless architecture to accommodate the changes you've specified. The architecture will leverage AWS services like Lambda, API Gateway, DynamoDB, OpenSearch, SNS, and will be packaged and deployed using AWS SAM. We will not use AWS Step Functions as per your instruction.
+
+High-Level Overview
+API Gateway: Exposes four endpoints to handle user requests for submitting, listing, updating, and deleting requests.
+Lambda Functions:
+UserRequestHandler: A single Lambda function that handles all API requests related to user requests (submit, list, update, delete).
+ScraperFunction: Scrapes data for each unique postcode and stores it in a corresponding DynamoDB table.
+IndexerFunction: Triggered by DynamoDB Streams to index data into OpenSearch.
+MatcherFunction: Matches user requests with products in the corresponding postcode's catalog table and sends notifications via SNS.
+DynamoDB:
+UserRequestsTable: Stores user requests with a unique RequestID.
+ProductCatalogTables: One table per postcode, storing product data for that postcode.
+OpenSearch: Used for indexing and searching product data.
+SNS: Sends SMS notifications to users when matches are found.
+Detailed Workflow
+1. API Endpoints and UserRequestHandler Lambda Function
+Endpoints:
+POST /submitanewrequest
+Purpose: Submit a new user request.
+Input: Postcode, ProductName, Discount, PhoneNumber.
+Process:
+Validate inputs.
+Generate a unique RequestID.
+Store the request in the UserRequestsTable.
+GET /listrequests
+Purpose: List all current user requests.
+Process:
+Retrieve all requests from the UserRequestsTable.
+Return the list to the user.
+DELETE /deletearequest
+Purpose: Delete a user request by RequestID.
+Input: RequestID.
+Process:
+Validate RequestID.
+Delete the request from the UserRequestsTable.
+PUT /update
+Purpose: Update a user request by RequestID.
+Input: RequestID, fields to update (ProductName, Discount, PhoneNumber).
+Process:
+Validate RequestID and input fields.
+Update the request in the UserRequestsTable.
+UserRequestHandler Lambda Function
+Triggers: API Gateway for all four endpoints.
+Responsibilities:
+Handle all CRUD operations for user requests.
+Interact with the UserRequestsTable.
+Implementation:
+Use routing within the Lambda function to handle different HTTP methods and paths.
+Ensure input validation and error handling.
+2. ScraperFunction Lambda Function
+Trigger: Scheduled via EventBridge (e.g., every week).
+Process:
+Identify Unique Postcodes:
+Query the UserRequestsTable to get a list of unique postcodes from active requests.
+For Each Postcode:
+Scrape Data:
+Use Selenium to scrape product data for the specific postcode.
+Store Data:
+Store the scraped data in a ProductCatalogTable corresponding to that postcode.
+If the table doesn't exist, create it dynamically.
+Considerations:
+Dynamic Table Creation:
+Use a naming convention like ProductCatalog_<Postcode>.
+Ensure appropriate IAM permissions for table creation.
+Scalability:
+Handle multiple postcodes efficiently, possibly by parallel processing or batching.
+3. IndexerFunction Lambda Function
+Trigger: DynamoDB Streams for all ProductCatalogTables.
+Process:
+For Each Record in the Stream:
+Index the new or updated product data into OpenSearch.
+Maintain an index per postcode or a combined index with postcode as a field.
+Implementation:
+Use the stream ARN for each ProductCatalogTable to trigger the function.
+Ensure the function is aware of which postcode's data it's processing.
+4. MatcherFunction Lambda Function
+Trigger: After indexing is complete or on a schedule.
+Process:
+Retrieve User Requests:
+Scan the UserRequestsTable for active requests.
+For Each User Request:
+Identify Corresponding ProductCatalogTable based on the postcode.
+Search OpenSearch:
+Perform a search in OpenSearch for products matching ProductName and Discount criteria in the user's postcode.
+Send Notification:
+If a match is found, send an SMS notification to the user via SNS.
+Considerations:
+Efficient Searching:
+Use filters in OpenSearch to limit results to the specific postcode.
+Avoiding Duplicate Notifications:
+Track which users have been notified about which products to prevent duplicate messages.
+AWS Services and Configurations
+API Gateway
+Endpoints:
+POST /submitanewrequest
+GET /listrequests
+DELETE /deletearequest
+PUT /update
+Integration: Lambda Proxy Integration with UserRequestHandler.
+Security: Implement authentication if necessary (e.g., API keys, Cognito).
+Lambda Functions
+UserRequestHandler
+CodeUri: src/user_request_handler/
+Handler: app.lambda_handler
+Policies:
+CRUD access to UserRequestsTable.
+ScraperFunction
+CodeUri: src/scraper_function/
+Handler: app.lambda_handler
+Policies:
+Read access to UserRequestsTable.
+CRUD access to ProductCatalogTables.
+DynamoDB table creation permissions.
+Layers:
+SeleniumLayer for Selenium and WebDriver dependencies.
+IndexerFunction
+CodeUri: src/indexer_function/
+Handler: app.lambda_handler
+Policies:
+Access to OpenSearch domain.
+Trigger:
+DynamoDB Streams from all ProductCatalogTables.
+MatcherFunction
+CodeUri: src/matcher_function/
+Handler: app.lambda_handler
+Policies:
+Read access to UserRequestsTable.
+Access to OpenSearch domain.
+Publish access to SNS topic.
+DynamoDB Tables
+UserRequestsTable
+Partition Key: RequestID (generated UUID or similar).
+Attributes: Postcode, ProductName, Discount, PhoneNumber, Timestamp, etc.
+ProductCatalogTables
+Naming Convention: ProductCatalog_<Postcode>
+Partition Key: ProductID
+Attributes: ProductName, StoreBrand, Discount, Availability, etc.
+Streams: Enabled to trigger IndexerFunction.
+OpenSearch
+Indices:
+Option 1: Separate index for each postcode.
+Option 2: Single index with Postcode as a field.
+Usage:
+Index product data for efficient searching.
+Perform searches based on ProductName, Discount, and Postcode.
+SNS
+Topic: UserNotifications
+Usage:
+MatcherFunction publishes messages to this topic.
+Configured to send SMS messages to users.
+Implementation Details
+1. UserRequestHandler Lambda Function
+Routing Logic:
+Use a framework like Flask or AWS Lambda Powertools for Python to handle different HTTP methods and paths.
+Input Validation:
+Ensure all inputs are validated for correctness and security.
+Unique RequestID Generation:
+Use UUIDs or a similar method to generate unique identifiers for requests.
+2. ScraperFunction Enhancements
+Handling Multiple Postcodes:
+Fetch unique postcodes from UserRequestsTable.
+Loop through each postcode to perform scraping.
+Dynamic Table Creation:
+Before scraping for a postcode, check if the corresponding ProductCatalogTable exists.
+If not, create the table with appropriate settings and enable streams.
+Concurrency Considerations:
+Implement throttling or concurrency controls if necessary to manage API rate limits of the websites being scraped.
+3. IndexerFunction Adjustments
+DynamoDB Streams Management:
+Modify the function to handle streams from multiple tables.
+Alternatively, create a stream consumer for each table.
+Indexing Strategy:
+Decide whether to use separate indices or a combined index with Postcode as a field for efficient querying.
+4. MatcherFunction Logic
+Matching Algorithm:
+For each user request, search for matching products in the user's postcode.
+Use OpenSearch's fuzzy search capabilities to match ProductName.
+Apply filters for Discount thresholds.
+Notification Management:
+Keep track of notifications sent to avoid duplicates.
+Possibly store notification history in a separate DynamoDB table.
