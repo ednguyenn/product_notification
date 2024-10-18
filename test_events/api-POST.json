@@ -1,7 +1,7 @@
 {
     "httpMethod": "POST",
     "path": "/submitanewrequest",
-    "body": "{\"Postcode\": \"12345\", \"ProductName\": \"Cat Litter 14L\", \"Discount\": 50, \"PhoneNumber\": \"0420216545\"}",
+    "body": "{\"POSTCODE\": \"3220\", \"ProductName\": \"Cat Litter\", \"PhoneNumber\": \"0420216545\"}",
     "headers": {
       "Content-Type": "application/json"
     },

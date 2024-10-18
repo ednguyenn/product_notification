@@ -16,7 +16,7 @@ class Market(webdriver.Edge):
     """
     A class to automate interactions with the Woolworths online catalogue using Selenium WebDriver.
     """
-    def __init__(self, driver_path="./drivers/msedgedriver") -> None:
+    def __init__(self, driver_path="/opt/selenium_layer/bin/msedgedriver") -> None:
         self.driver_path = driver_path
         os.environ['PATH'] += self.driver_path
 
@@ -25,6 +25,10 @@ class Market(webdriver.Edge):
         options.add_experimental_option('excludeSwitches', ['enable-logging'])
         # Keep the browser open for testing
         options.add_argument('--headless') 
+        options.add_argument('--headless')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
 
         # Initialize the Edge driver with options
         super(Market, self).__init__(options=options)
