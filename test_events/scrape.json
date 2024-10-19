@@ -1,0 +1,25 @@
+{
+    "Records": [
+      {
+        "eventID": "1",
+        "eventName": "INSERT",
+        "eventVersion": "1.1",
+        "eventSource": "aws:dynamodb",
+        "awsRegion": "ap-southeast-2",
+        "dynamodb": {
+          "ApproximateCreationDateTime": 1628537760,
+          "Keys": {
+            "POSTCODE": { "S": "3220" }
+          },
+          "NewImage": {
+            "POSTCODE": { "S": "3220" }
+          },
+          "SequenceNumber": "111",
+          "SizeBytes": 26,
+          "StreamViewType": "NEW_IMAGE"
+        },
+        "eventSourceARN": "arn:aws:dynamodb:us-east-1:123456789012:table/UniquePostcodesTable/stream/2021-08-09T17:05:00.000"
+      }
+    ]
+  }
+  
