@@ -1,7 +1,5 @@
 import os
-import pandas as pd
 from utils import Market
-import boto3
 import json
 from botocore.exceptions import ClientError
 from boto3.dynamodb.conditions import Key, Attr

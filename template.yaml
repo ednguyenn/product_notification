@@ -113,6 +113,8 @@ Resources:
       Layers:
         - !Ref SeleniumLayer
         - !Ref CommonLayer
+      MemorySize: 512  # Increase memory to 512 MB
+      Timeout: 300  
       Environment:
         Variables:
           PRODUCT_CATALOG_TABLE: !Ref ProductCatalogTable

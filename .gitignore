@@ -1,2 +1,3 @@
 venv   
 /src/layers/selenium_layer/python
+.aws-sam
