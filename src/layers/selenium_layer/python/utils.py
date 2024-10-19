@@ -23,16 +23,13 @@ class Market(webdriver.Edge):
         options = webdriver.EdgeOptions()
         # Ignore browser warning error
         options.add_experimental_option('excludeSwitches', ['enable-logging'])
-        # Keep the browser open for testing
         options.add_argument('--headless') 
-        options.add_argument('--headless')
         options.add_argument('--disable-gpu')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
 
         # Initialize the Edge driver with options
         super(Market, self).__init__(options=options)
-        self.maximize_window()
         self.product_extractor = ProductExtractor(self)
 
     def land_first_page(self,url):
@@ -80,6 +77,20 @@ class Market(webdriver.Edge):
             WebDriverWait(self, 10).until(
                 EC.presence_of_all_elements_located((By.CLASS_NAME, 'sf-navcategory-link'))
             )
+            """
+            def hover_to_toggle_categories(self):
+                try:
+                    hover_element = WebDriverWait(self, 10).until(
+                        EC.visibility_of_element_located((By.ID, 'sf-navcategory-button'))
+                    )
+                    self.execute_script("arguments[0].dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));", hover_element)
+                    # Wait until the category list appears
+                    WebDriverWait(self, 10).until(
+                        EC.presence_of_all_elements_located((By.CLASS_NAME, 'sf-navcategory-link'))
+                    )
+                except Exception as e:
+                    print(f"Error during hover: {e}")
+            """
         except Exception as e:
             print(f"Error during hover: {e}")
 
@@ -137,6 +148,7 @@ class Market(webdriver.Edge):
             time.sleep(2)  # Allow page to fully load before extraction
             return True
         except Exception as e:
+            print(f"Error clicking next page: {e}")
             return False
 
     def extract_products_in_category(self):
@@ -160,39 +172,6 @@ class Market(webdriver.Edge):
             print(f"An error occurred during product extraction: {e}")
         finally:
             return products, pages_navigated
-
-    def get_products_from_current_page(self):
-        """
-        Extract product data from the current page.
-
-        Returns:
-            list: A list of product data dictionaries.
-        """
-        try:
-            products = WebDriverWait(self, 10).until(
-                EC.presence_of_all_elements_located((By.CLASS_NAME, 'sf-item-content'))
-            )
-
-            product_list = []
-            for product in products:
-                data = {
-                    "title": self.product_extractor.try_get_text(product, ".sf-item-heading", "NA"),
-                    "price": self.product_extractor.try_get_text(product, ".sf-pricedisplay", "NA"),
-                    "option_suffix": self.product_extractor.try_get_text(product, ".sf-optionsuffix", "NA"),
-                    "sale_price": self.product_extractor.try_get_text(product, ".sf-saleoptiontext", "NA"),
-                    "regular_price": self.product_extractor.try_get_text(product, ".sf-regprice", "NA"),
-                    "regoptiondesc": self.product_extractor.try_get_text(product, ".sf-regoptiondesc", "NA"),
-                    "saving": self.product_extractor.try_get_text(product, ".sf-regprice", "NA"),
-                    "offer_valid": self.product_extractor.try_get_text(product, ".sale-dates", "NA"),
-                    "comparative_text": self.product_extractor.try_get_text(product, ".sf-comparativeText", "NA"),
-                    "sale_option": self.product_extractor.try_get_text(product, ".sf-saleoptiondesc", "NA")
-                }
-                product_list.append(data)
-            return product_list
-
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            return []  # Return an empty list if an error occurs
 
     def go_back_to_category_page(self, pages_navigated):
         """
@@ -264,7 +243,7 @@ class ProductExtractor:
 
             for product in products:
                 data = {
-                    "title": self.try_get_text(product, ".sf-item-heading", "NA"),
+                    "ProductName": self.try_get_text(product, ".sf-item-heading", "NA"),
                     "price": self.try_get_text(product, ".sf-pricedisplay", "NA"),
                     "option_suffix": self.try_get_text(product, ".sf-optionsuffix", "NA"),
                     "sale_price": self.try_get_text(product, ".sf-saleoptiontext", "NA"),

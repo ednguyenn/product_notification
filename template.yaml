@@ -27,7 +27,7 @@ Resources:
     Type: AWS::Serverless::LayerVersion
     Properties:
       LayerName: SeleniumLayer
-      Description: Selenium dependencies and chromedriver
+      Description: Selenium dependencies and EdgeDriver
       ContentUri: src/layers/selenium_layer/
       CompatibleRuntimes:
         - python3.9
@@ -69,6 +69,40 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref UserRequestsTable
 
+  # UniquePostcodeUpdaterFunction
+  UniquePostcodeUpdaterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/unique_postcode_updater/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref CommonLayer
+      Environment:
+        Variables:
+          UNIQUE_POSTCODES_TABLE: !Ref UniquePostcodesTable
+      Events:
+        UserRequestsTableStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt UserRequestsTable.StreamArn
+            StartingPosition: LATEST
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetRecords
+                - dynamodb:GetShardIterator
+                - dynamodb:DescribeStream
+                - dynamodb:ListStreams
+              Resource: !Sub '${UserRequestsTable.StreamArn}'
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${UniquePostcodesTable}'
+
   # ScraperFunction
   ScraperFunction:
     Type: AWS::Serverless::Function
@@ -81,22 +115,30 @@ Resources:
         - !Ref CommonLayer
       Environment:
         Variables:
-          USER_REQUESTS_TABLE: !Ref UserRequestsTable
           PRODUCT_CATALOG_TABLE: !Ref ProductCatalogTable
+          WOOLWORTH_URL: 'https://https://www.woolworths.com.au/shop/catalogue/view#view=catalogue2&saleId=54911&areaName=VIC&page=1.woolworths.com.au/'  # Set your URL here
+      Events:
+        UniquePostcodesTableStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt UniquePostcodesTable.StreamArn
+            StartingPosition: LATEST
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: '*'
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
               Action:
-                - dynamodb:CreateTable
-              Resource: '*'
-      Events:
-        ScrapeSchedule:
-          Type: Schedule
-          Properties:
-            Schedule: rate(7 days)
+                - dynamodb:GetRecords
+                - dynamodb:GetShardIterator
+                - dynamodb:DescribeStream
+                - dynamodb:ListStreams
+              Resource: !Sub '${UniquePostcodesTable.StreamArn}'
+            - Effect: Allow
+              Action:
+                - dynamodb:BatchWriteItem
+              Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductCatalogTable}'
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProductCatalogTable
 
   # IndexerFunction
   IndexerFunction:
@@ -159,27 +201,47 @@ Resources:
   UserRequestsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: UserRequests
+      TableName: UserRequestsTable
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
-        - AttributeName: RequestID
+        - AttributeName: POSTCODE
+          AttributeType: S
+        - AttributeName: ProductName
           AttributeType: S
       KeySchema:
-        - AttributeName: RequestID
+        - AttributeName: POSTCODE
           KeyType: HASH
+        - AttributeName: ProductName
+          KeyType: RANGE
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+
+  UniquePostcodesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: UniquePostcodesTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: POSTCODE
+          AttributeType: S
+      KeySchema:
+        - AttributeName: POSTCODE
+          KeyType: HASH
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
 
   ProductCatalogTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: ProductCatalog
+      TableName: ProductCatalogTable
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
-        - AttributeName: Postcode
+        - AttributeName: POSTCODE
           AttributeType: S
         - AttributeName: ProductID
           AttributeType: S
       KeySchema:
-        - AttributeName: Postcode
+        - AttributeName: POSTCODE
           KeyType: HASH
         - AttributeName: ProductID
           KeyType: RANGE
@@ -226,6 +288,9 @@ Outputs:
   UserRequestHandlerFunctionArn:
     Description: "ARN of the UserRequestHandlerFunction"
     Value: !GetAtt UserRequestHandlerFunction.Arn
+  UniquePostcodeUpdaterFunctionArn:
+    Description: "ARN of the UniquePostcodeUpdaterFunction"
+    Value: !GetAtt UniquePostcodeUpdaterFunction.Arn
   ScraperFunctionArn:
     Description: "ARN of the ScraperFunction"
     Value: !GetAtt ScraperFunction.Arn
@@ -238,6 +303,9 @@ Outputs:
   UserRequestsTableName:
     Description: "Name of the DynamoDB table for User Requests"
     Value: !Ref UserRequestsTable
+  UniquePostcodesTableName:
+    Description: "Name of the DynamoDB table for Unique Postcodes"
+    Value: !Ref UniquePostcodesTable
   ProductCatalogTableName:
     Description: "Name of the DynamoDB table for Product Catalog"
     Value: !Ref ProductCatalogTable
@@ -247,4 +315,3 @@ Outputs:
   OpenSearchDomainEndpoint:
     Description: "Endpoint of the OpenSearch Domain"
     Value: !GetAtt OpenSearchDomain.DomainEndpoint
-
