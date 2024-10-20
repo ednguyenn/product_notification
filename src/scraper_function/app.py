@@ -1,82 +1,81 @@
 import os
-from utils import Market
+import boto3
 import json
-from botocore.exceptions import ClientError
-from boto3.dynamodb.conditions import Key, Attr
+from datetime import datetime, timedelta
+
+dynamodb = boto3.resource('dynamodb')
+lambda_client = boto3.client('lambda')
+
+UNIQUE_POSTCODES_TABLE = os.environ.get('UNIQUE_POSTCODES_TABLE', 'UniquePostcodesTable')
+FUNCTION_NAME = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', 'ScraperFunction')
+IS_LOCAL = os.environ.get('AWS_SAM_LOCAL') == 'true'
 
 def lambda_handler(event, context):
-    try:
-        dynamodb = boto3.resource('dynamodb')
-
-        product_table_name = 'ProductCatalogTable'
-        product_table = dynamodb.Table(product_table_name)
-
-        # Ensure WOOLWORTH_URL is set as an environment variable
-        WOOLWORTH_URL = os.getenv('WOOLWORTH_URL')
-        if not WOOLWORTH_URL:
-            raise Exception("WOOLWORTH_URL environment variable not set.")
-
-        # Process records from DynamoDB Stream
+    print(f"IS_LOCAL: {IS_LOCAL}")  # Debug print
+    
+    if 'Records' in event:
+        # Triggered by DynamoDB Stream
         for record in event['Records']:
             if record['eventName'] == 'INSERT':
-                # Extract the postcode from the new image
-                new_image = record['dynamodb']['NewImage']
-                postcode = new_image['POSTCODE']['S']
+                postcode = record['dynamodb']['NewImage']['POSTCODE']['S']
+                perform_scraping(postcode)
+    else:
+        # Triggered by EventBridge or self-invocation
+        table = dynamodb.Table(UNIQUE_POSTCODES_TABLE)
+        last_update = get_last_update_time(table)
+        
+        if last_update is None or datetime.now() - last_update > timedelta(days=7):
+            # No updates in the last 7 days, perform scraping for all postcodes
+            response = table.scan()
+            for item in response['Items']:
+                perform_scraping(item['POSTCODE'])
+        else:
+            # There was a recent update, wait for the next scheduled trigger
+            print("Update detected within the last 7 days. Waiting for next scheduled trigger.")
+    
+    # Self-trigger for the next run (only in AWS environment)
+    if not IS_LOCAL:
+        print("Attempting to self-invoke (AWS environment)")
+        try:
+            lambda_client.invoke(
+                FunctionName=FUNCTION_NAME,
+                InvocationType='Event'
+            )
+        except Exception as e:
+            print(f"Error invoking function: {e}")
+    else:
+        print("Running locally, skipping self-invocation")
 
-                print(f"Processing postcode: {postcode}")
+    return {
+        'statusCode': 200,
+        'body': json.dumps('Scraping process completed')
+    }
 
-                # Perform scraping for this postcode
-                print(f"Scraping data for postcode {postcode}...")
-                try:
-                    # Initialize the Market bot
-                    bot = Market()
+def perform_scraping(postcode):
+    # Implement your scraping logic here
+    print(f"Scraping for postcode: {postcode}")
 
-                    # Land on the first page
-                    bot.land_first_page(url=WOOLWORTH_URL)
+def get_last_update_time(table):
+    response = table.scan(
+        Limit=1,
+        ScanIndexForward=False
+    )
+    if response['Items']:
+        return datetime.fromtimestamp(response['Items'][0].get('LastUpdateTime', 0))
+    return None
 
-                    # Enter the desired postcode to scrape data
-                    bot.enter_postcode(postcode=postcode)
-                    bot.select_first_postcode_option()
-                    bot.click_read_catalogue_button()
-
-                    # Get the list of categories
-                    category_list = bot.get_category_list()
-
-                    # Initialize an empty list to hold all product data
-                    full_data = []
-
-                    # Iterate through each category and extract product data
-                    for category in category_list:
-                        bot.click_category(category)
-                        category_data, back_clicks = bot.extract_products_in_category()
-                        full_data.extend(category_data)
-                        bot.go_back_to_category_page(back_clicks)
-
-                    # Save data to DynamoDB
-                    with product_table.batch_writer() as batch:
-                        for item in full_data:
-                            item['POSTCODE'] = postcode
-                            item['ProductID'] = item.get('ProductID', item.get('ProductName', 'Unknown'))
-                            item['ProductName'] = item.get('ProductName', 'Unknown')
-                            # Ensure all attribute values are strings
-                            item = {str(k): str(v) for k, v in item.items()}
-                            batch.put_item(Item=item)
-
-                    print(f"Data for postcode {postcode} saved to DynamoDB table {product_table_name}")
-                except Exception as e:
-                    print(f"Error scraping data for postcode {postcode}: {e}")
-                    continue  # Skip to the next record
-            else:
-                print(f"Event {record['eventName']} is not an INSERT operation. Skipping.")
-
-        return {
-            'statusCode': 200,
-            'body': json.dumps('Scraping completed.')
-        }
-
-    except Exception as e:
-        print("Error:", e)
-        return {
-            'statusCode': 500,
-            'body': json.dumps(str(e))
-        }
+# For local testing
+if __name__ == "__main__":
+    test_event = {
+        "Records": [
+            {
+                "eventName": "INSERT",
+                "dynamodb": {
+                    "NewImage": {
+                        "POSTCODE": {"S": "3220"}
+                    }
+                }
+            }
+        ]
+    }
+    lambda_handler(test_event, None)

@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # Set your variables
-AWS_REGION="<your-aws-region>"
-ACCOUNT_ID="<your-account-id>"
-REPO_NAME="<your-repo-name>"
-IMAGE_NAME="<your-image-name>"
+AWS_REGION="<ap-southeast-2>"
+ACCOUNT_ID="<211125652748>"
+REPO_NAME="scraper-function"
+IMAGE_NAME="scraper-function"
 
 # Build the Docker image
 echo "Building Docker image..."
-docker build -t $IMAGE_NAME .
+docker build -t $IMAGE_NAME ./src/scraper_function
 
 # Log in to Amazon ECR
 echo "Logging in to Amazon ECR..."

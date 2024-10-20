@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Serverless application for product availability notifications.
+Description: Serverless Backend for Product Availability Notifications.
 
 Globals:
   Function:
@@ -107,40 +107,31 @@ Resources:
   ScraperFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/scraper_function/
-      Handler: app.lambda_handler
-      Runtime: python3.9
-      Layers:
-        - !Ref SeleniumLayer
-        - !Ref CommonLayer
-      MemorySize: 512  # Increase memory to 512 MB
-      Timeout: 300  
+      PackageType: Image
+      ImageUri: src/scraper_function/
+      MemorySize: 512
+      Timeout: 300
       Environment:
         Variables:
-          PRODUCT_CATALOG_TABLE: !Ref ProductCatalogTable
-          WOOLWORTH_URL: 'https://https://www.woolworths.com.au/shop/catalogue/view#view=catalogue2&saleId=54911&areaName=VIC&page=1.woolworths.com.au/'  # Set your URL here
+          UNIQUE_POSTCODES_TABLE: UniquePostcodesTable
       Events:
-        UniquePostcodesTableStream:
+        StreamTrigger:
           Type: DynamoDB
           Properties:
             Stream: !GetAtt UniquePostcodesTable.StreamArn
-            StartingPosition: LATEST
+            StartingPosition: TRIM_HORIZON
+            BatchSize: 1
       Policies:
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - dynamodb:GetRecords
-                - dynamodb:GetShardIterator
-                - dynamodb:DescribeStream
-                - dynamodb:ListStreams
-              Resource: !Sub '${UniquePostcodesTable.StreamArn}'
-            - Effect: Allow
-              Action:
-                - dynamodb:BatchWriteItem
-              Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProductCatalogTable}'
+        - DynamoDBStreamReadPolicy:
+            TableName: !Ref UniquePostcodesTable
+            StreamName: !GetAtt UniquePostcodesTable.StreamArn
         - DynamoDBCrudPolicy:
             TableName: !Ref ProductCatalogTable
+        - AWSLambdaBasicExecutionRole
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: src/scraper_function/
+      DockerTag: python3.9-v1
 
   # IndexerFunction
   IndexerFunction:
