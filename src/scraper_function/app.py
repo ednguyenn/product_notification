@@ -1,10 +1,8 @@
 import os
-import pandas as pd
 import boto3
 from utils import Market
-from market.constant import *
 import json
-
+from selenium.webdriver.common.by import By
 # Initialize DynamoDB resource
 dynamodb = boto3.resource('dynamodb')
 product_table = dynamodb.Table('ProductCatalog')  # Name of the DynamoDB table
@@ -25,10 +23,10 @@ def lambda_handler(event, context):
                 postcode = new_image['POSTCODE']['S']  # Assuming POSTCODE is stored as a string in DynamoDB
 
                 # Initialize the Market bot
-                bot = Market()
+                bot = Market(driver_path=By.XPATH)
                 
                 # Land on the first page
-                bot.land_first_page(url=WOOLWORTH_URL)
+                bot.land_first_page(url='https://www.woolworths.com.au/shop/catalogue/view#view=catalogue2&saleId=54911&areaName=VIC&page=1')
                 
                 # Enter the postcode from the event data
                 bot.enter_postcode(postcode=postcode)
@@ -43,9 +41,8 @@ def lambda_handler(event, context):
                     bot.click_category(category)
                     category_data, back_clicks = bot.extract_products_in_category()
                     
-                    # Insert product data into DynamoDB
-                    for product in category_data:
-                        write_to_dynamodb(product, postcode, category)
+                    # Store product data directly using the new method
+                    bot.store_product_data(category_data, postcode, category)
 
                     bot.go_back_to_category_page(back_clicks)
         
@@ -76,33 +73,3 @@ def lambda_handler(event, context):
     }
 
 
-def write_to_dynamodb(product, postcode, category):
-    """
-    Write a product item to the DynamoDB ProductCatalog table.
-    
-    Args:
-        product (dict): The product data extracted from the page.
-        postcode (str): The postcode associated with the scrape request.
-        category (str): The product category.
-    """
-    try:
-        # Prepare the item to insert into DynamoDB
-        item = {
-            'ProductName': product.get('ProductName', 'NA'),
-            'Postcode': postcode,
-            'Category': category,
-            'Price': product.get('price', 'NA'),
-            'OptionSuffix': product.get('option_suffix', 'NA'),
-            'SalePrice': product.get('sale_price', 'NA'),
-            'RegularPrice': product.get('regular_price', 'NA'),
-            'Saving': product.get('saving', 'NA'),
-            'OfferValid': product.get('offer_valid', 'NA'),
-            'ComparativeText': product.get('comparative_text', 'NA'),
-            'SaleOption': product.get('sale_option', 'NA')
-        }
-
-        # Write the item to DynamoDB
-        product_table.put_item(Item=item)
-
-    except Exception as e:
-        print(f"Error writing to DynamoDB: {e}")

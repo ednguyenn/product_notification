@@ -23,15 +23,6 @@ Resources:
       CompatibleRuntimes:
         - python3.9
 
-  SeleniumLayer:
-    Type: AWS::Serverless::LayerVersion
-    Properties:
-      LayerName: SeleniumLayer
-      Description: Selenium dependencies and EdgeDriver
-      ContentUri: src/layers/selenium_layer/
-      CompatibleRuntimes:
-        - python3.9
-
   # UserRequestHandlerFunction
   UserRequestHandlerFunction:
     Type: AWS::Serverless::Function
@@ -109,8 +100,8 @@ Resources:
     Properties:
       PackageType: Image
       ImageUri: src/scraper_function/
-      MemorySize: 512
-      Timeout: 300
+      MemorySize: 1024
+      Timeout: 600
       Environment:
         Variables:
           UNIQUE_POSTCODES_TABLE: UniquePostcodesTable
@@ -275,9 +266,6 @@ Outputs:
   CommonLayerVersionArn:
     Description: "ARN of the Common Layer"
     Value: !Ref CommonLayer
-  SeleniumLayerVersionArn:
-    Description: "ARN of the Selenium Layer"
-    Value: !Ref SeleniumLayer
   UserRequestHandlerFunctionArn:
     Description: "ARN of the UserRequestHandlerFunction"
     Value: !GetAtt UserRequestHandlerFunction.Arn

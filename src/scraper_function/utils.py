@@ -11,45 +11,33 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.chrome.service import Service
 
 
+
 class Market(webdriver.Chrome):
     """
     A class to automate interactions with the Woolworths online catalogue using Selenium WebDriver.
     """
-    def __init__(self, driver_path="/opt/chrome-driver/chromedriver-linux64/chromedriver", binary_path="/opt/chrome/chrome-linux64/chrome") -> None:
-        self.driver_path = driver_path
-        self.binary_path = binary_path
-        
-        # Append the driver path to the system PATH
+    def __init__(self, driver_path: str) -> None:
+        self.driver_path = driver_path  # Ensure driver_path is initialized
         os.environ['PATH'] += os.pathsep + self.driver_path
 
-        chrome_options = webdriver.ChromeOptions()
-        chrome_options.add_argument('--headless')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--window-size=1280x1696')
-        chrome_options.add_argument('--user-data-dir=/tmp/user-data')
-        chrome_options.add_argument('--hide-scrollbars')
-        chrome_options.add_argument('--enable-logging')
-        chrome_options.add_argument('--log-level=0')
-        chrome_options.add_argument('--v=99')
-        chrome_options.add_argument('--single-process')
-        chrome_options.add_argument('--data-path=/tmp/data-path')
-        chrome_options.add_argument('--ignore-certificate-errors')
-        chrome_options.add_argument('--homedir=/tmp')
-        chrome_options.add_argument('--disk-cache-dir=/tmp/cache-dir')
-        chrome_options.add_argument(
-            'user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36'
-        )
+        options = webdriver.ChromeOptions()
 
-        # Set the binary location for headless Chromium
-        chrome_options.binary_location = self.binary_path
+        service = Service("/opt/chromedriver")  # Corrected import usage
+        options.binary_location = '/opt/chrome/chrome'
+        options.add_argument("--headless=new")
+        options.add_argument('--no-sandbox')
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1280x1696")
+        options.add_argument("--single-process")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-dev-tools")
+        options.add_argument("--no-zygote")
+        options.add_argument(f"--user-data-dir={mkdtemp()}")
+        options.add_argument(f"--data-path={mkdtemp()}")
+        options.add_argument(f"--disk-cache-dir={mkdtemp()}")
+        options.add_argument("--remote-debugging-port=9222")
 
-        # Set up the service for ChromeDriver
-        service = Service(self.driver_path)
-
-        # Initialize the Chrome driver with options and service
-        super(Market, self).__init__(service=service, options=chrome_options)
-
+        chrome = webdriver.Chrome(options=options, service=service)
         # Initialize product extractor or any other related components
         self.product_extractor = ProductExtractor(self)
         
@@ -94,24 +82,9 @@ class Market(webdriver.Chrome):
                 EC.visibility_of_element_located((By.ID, 'sf-navcategory-button'))
             )
             action.move_to_element(hover_element).perform()
-            # Wait until the category list appears
             WebDriverWait(self, 10).until(
                 EC.presence_of_all_elements_located((By.CLASS_NAME, 'sf-navcategory-link'))
             )
-            """
-            def hover_to_toggle_categories(self):
-                try:
-                    hover_element = WebDriverWait(self, 10).until(
-                        EC.visibility_of_element_located((By.ID, 'sf-navcategory-button'))
-                    )
-                    self.execute_script("arguments[0].dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));", hover_element)
-                    # Wait until the category list appears
-                    WebDriverWait(self, 10).until(
-                        EC.presence_of_all_elements_located((By.CLASS_NAME, 'sf-navcategory-link'))
-                    )
-                except Exception as e:
-                    print(f"Error during hover: {e}")
-            """
         except Exception as e:
             print(f"Error during hover: {e}")
 
@@ -205,6 +178,26 @@ class Market(webdriver.Chrome):
             self.back()
             time.sleep(2)  # Wait for the page to fully load
 
+    def store_product_data(self, product_data, postcode, category):
+        try:
+            for product in product_data:
+                item = {
+                    'ProductName': product.get('ProductName', 'NA'),
+                    'Postcode': postcode,
+                    'Category': category,
+                    'Price': product.get('price', 'NA'),
+                    'OptionSuffix': product.get('option_suffix', 'NA'),
+                    'SalePrice': product.get('sale_price', 'NA'),
+                    'RegularPrice': product.get('regular_price', 'NA'),
+                    'Saving': product.get('saving', 'NA'),
+                    'OfferValid': product.get('offer_valid', 'NA'),
+                    'ComparativeText': product.get('comparative_text', 'NA'),
+                    'SaleOption': product.get('sale_option', 'NA')
+                }
+                # Assuming product_table is initialized elsewhere in the class
+                self.product_table.put_item(Item=item)
+        except Exception as e:
+            print(f"Error writing to DynamoDB: {e}")
 
 class ProductExtractor:
     """
