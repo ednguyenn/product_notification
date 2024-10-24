@@ -14,5 +14,4 @@ RUN pip install selenium==4.25.0
 COPY --from=build /opt/chrome-linux64 /opt/chrome
 COPY --from=build /opt/chromedriver-linux64 /opt/
 COPY app.py ./
-COPY utils.py ./
 CMD [ "app.lambda_handler" ]

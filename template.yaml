@@ -100,7 +100,7 @@ Resources:
     Properties:
       PackageType: Image
       ImageUri: src/scraper_function/
-      MemorySize: 1024
+      MemorySize: 2048
       Timeout: 600
       Environment:
         Variables:
@@ -222,12 +222,12 @@ Resources:
       AttributeDefinitions:
         - AttributeName: POSTCODE
           AttributeType: S
-        - AttributeName: ProductID
+        - AttributeName: ProductName
           AttributeType: S
       KeySchema:
         - AttributeName: POSTCODE
           KeyType: HASH
-        - AttributeName: ProductID
+        - AttributeName: ProductName
           KeyType: RANGE
       StreamSpecification:
         StreamViewType: NEW_IMAGE
