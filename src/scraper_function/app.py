@@ -15,7 +15,15 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import TimeoutException
 
-
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,  # Set the logging level
+    format='%(asctime)s - %(levelname)s - %(message)s',  # Log format
+    handlers=[
+        logging.FileHandler('app.log'),  
+        logging.StreamHandler()  #log to console
+    ]
+)
 
 
 # Initialize DynamoDB resource
@@ -53,13 +61,16 @@ def lambda_handler(event, context):
                 
                 # Iterate through each category and extract product data
                 for category in category_list:
+                    # Click the category to load its products
                     bot.click_category(category)
-                    category_data, back_clicks = bot.extract_products_in_category()
-                    
-                    # Store product data directly using the new method
+
+                    # Extract all products in the current category
+                    category_data = bot.extract_products_in_category(category)
+
+                    # Store the extracted product data
                     bot.store_product_data(category_data, postcode, category)
 
-                    bot.go_back_to_category_page(back_clicks)
+                    time.sleep(0.5)
         
         return {
             'statusCode': 200,
@@ -106,7 +117,7 @@ class Market(webdriver.Chrome):
         options.add_argument("--headless=new")
         options.add_argument('--no-sandbox')
         options.add_argument("--disable-gpu")
-        options.add_argument("--window-size=1920x1080")
+        options.add_argument("--window-size=1080x1920")
         options.add_argument("--single-process")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-dev-tools")
@@ -117,10 +128,14 @@ class Market(webdriver.Chrome):
         options.add_argument("--remote-debugging-port=9222")
         options.add_argument(f"--user-agent={USER_AGENT}")
 
-        super().__init__(options=options, service=service)
-
-        # Initialize product extractor or any other related components
-        self.product_extractor = ProductExtractor(self)
+        try:
+            super().__init__(options=options, service=service)
+            logging.info("WebDriver initialized successfully.")
+            
+            # Initialize product extractor or any other related components
+            self.product_extractor = ProductExtractor(self)
+        except Exception as e:
+            logging.error(f"Failed to initialize WebDriver: {e}")
         
     def land_first_page(self,url):
         """
@@ -175,15 +190,25 @@ class Market(webdriver.Chrome):
         """
         action = ActionChains(self)
         try:
+            # Wait for the hover element to be visible
             hover_element = WebDriverWait(self, 10).until(
                 EC.visibility_of_element_located((By.ID, 'sf-navcategory-button'))
             )
+            
+            # Perform the hover action
             action.move_to_element(hover_element).perform()
+
+            # Wait for the category links to be present after hovering
             WebDriverWait(self, 10).until(
                 EC.presence_of_all_elements_located((By.CLASS_NAME, 'sf-navcategory-link'))
             )
+
+            logging.info("Successfully hovered over the categories toggle.")
+            
+        except TimeoutException:
+            logging.error("Timeout occurred while waiting for the categories toggle or links.")
         except Exception as e:
-            print(f"Error during hover: {e}")
+            logging.error(f"Error during hover: {e}")
 
     def click_category(self, category):
         """
@@ -194,17 +219,24 @@ class Market(webdriver.Chrome):
         """
         try:
             self.hover_to_toggle_categories()
-            categories = WebDriverWait(self, 30).until(
+            categories = WebDriverWait(self, 60).until(
                 EC.presence_of_all_elements_located((By.CLASS_NAME, 'sf-navcategory-link'))
             )
+            # Iterate over the category elements to find the one that matches the name
             for element in categories:
                 if element.text == category:
-                    element.click()
-                    break
-        except TimeoutError:
-            print(f"Timeout occurred while waiting for category: {category}")
+                    # Wait for the element to be clickable after scrolling
+                    WebDriverWait(self, 10).until(EC.element_to_be_clickable(element))
+                    # Scroll the element into view
+                    self.execute_script("arguments[0].click();", element)
+                    time.sleep(1) # Wait for page to be fully loaded
+                    logging.info(f"Clicked on category: {category}")
+                    return True
+        except TimeoutException:
+            logging.error(f"Timeout occurred while waiting for category: {category}")
         except Exception as e:
-            print(f"An error occurred while clicking category: {category}. Error: {e}")
+            logging.error(f"An error occurred while clicking category: {category}. Error: {e}")
+        return False
 
     def get_category_list(self):
         """
@@ -233,18 +265,17 @@ class Market(webdriver.Chrome):
         """
         try:
             # Wait for the next page button to be clickable
-            next_page_btn = WebDriverWait(self, 5).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[aria-label="Next page"]'))
+            next_page_btn = WebDriverWait(self, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'a[aria-label="Next page"]'))
             )
-            
-            next_page_btn.click()
-            
-            # Wait for the button to become stale, indicating the next page has loaded
-            WebDriverWait(self, 10).until(
-                EC.staleness_of(next_page_btn)
-            )
-            
-            logging.info("Successfully navigated to the next page.")
+            # Scroll to the next page button
+            self.execute_script("arguments[0].scrollIntoView(true);", next_page_btn)
+
+            time.sleep(0.5) 
+
+            # Attempt to click the button
+            self.execute_script("arguments[0].click();", next_page_btn)     
+            time.sleep(0.75)    
             return True
         except TimeoutException:
             logging.info("No 'Next page' button found or it was not clickable. Reached the end of pagination.")
@@ -253,38 +284,28 @@ class Market(webdriver.Chrome):
             print(f"Error clicking next page: {e}")
             return False
 
-    def extract_products_in_category(self):
+    def extract_products_in_category(self,category):
         """
         Extract products from all pages of a category.
 
         Returns:
-            tuple: A list of product data and the number of pages navigated.
+            list: A list of product data from the category.
         """
-        products = []
-        pages_navigated = 0  # Counter to track the number of pages navigated
+        products = []  # To store the products from all pages in the category
         try:
             while True:
+                # Extract products from the current page
                 page_products = self.product_extractor.get_products_from_current_page()
-                print(f"Extracted {len(page_products)} products from page {pages_navigated + 1}")
+                print(f"Extracted {len(page_products)} products from the {category} page.")
                 products.extend(page_products)
+
+                # Check if there's a "Next page" button to click
                 if not self.click_next_page():
-                    break
-                pages_navigated += 1  # Increment the counter each time we navigate to the next page
+                    return False
         except Exception as e:
             print(f"An error occurred during product extraction: {e}")
         finally:
-            return products, pages_navigated
-
-    def go_back_to_category_page(self, pages_navigated):
-        """
-        Navigate back to the category page.
-
-        Args:
-            pages_navigated (int): The number of pages navigated.
-        """
-        for _ in range(pages_navigated + 1):  # Go back the number of pages navigated plus one more to reach the category page
-            self.back()
-            time.sleep(2)  # Wait for the page to fully load
+            return products
 
     def store_product_data(self, product_data, postcode, category):
         try:
