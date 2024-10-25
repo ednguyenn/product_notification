@@ -1,2 +1,3 @@
 .venv  
 .aws-sam
+/src/layers/opensearch_layer/*

@@ -21,6 +21,13 @@ Resources:
       Description: Common utilities for Lambda functions
       ContentUri: src/layers/common_layer/
       CompatibleRuntimes:
+        - python3.9.
+  OpenSearchLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: OpenSearchLayer
+      Content: src/layers/opensearch_layer.zip
+      CompatibleRuntimes:
         - python3.9
 
   # UserRequestHandlerFunction
@@ -67,8 +74,6 @@ Resources:
       CodeUri: src/unique_postcode_updater/
       Handler: app.lambda_handler
       Runtime: python3.9
-      Layers:
-        - !Ref CommonLayer
       Environment:
         Variables:
           UNIQUE_POSTCODES_TABLE: !Ref UniquePostcodesTable
@@ -132,7 +137,7 @@ Resources:
       Handler: app.lambda_handler
       Runtime: python3.9
       Layers:
-        - !Ref CommonLayer
+        - !Ref OpenSearchLayer
       Environment:
         Variables:
           OPENSEARCH_ENDPOINT: !GetAtt OpenSearchDomain.DomainEndpoint
@@ -158,7 +163,7 @@ Resources:
       Handler: app.lambda_handler
       Runtime: python3.9
       Layers:
-        - !Ref CommonLayer
+        - !Ref OpenSearchLayer
       Environment:
         Variables:
           USER_REQUESTS_TABLE: !Ref UserRequestsTable
