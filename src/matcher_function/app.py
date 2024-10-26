@@ -16,6 +16,7 @@ secret_key = get_secret("secret_key")
 # Environment variables
 OPENSEARCH_ENDPOINT = os.environ['OPENSEARCH_ENDPOINT']
 REGION = os.environ['AWS_REGION']
+sns_topic_arn = os.environ['SNS_TOPIC_ARN']
 
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
@@ -34,29 +35,72 @@ client = OpenSearch(
     connection_class=RequestsHttpConnection
 )
 
+
 def lambda_handler(event, context):
-    # Get POSTCODE and ProductName from event
-    postcode = event['POSTCODE']
-    product_name = event['ProductName']
+    # Check if triggered by DynamoDB stream or EventBridge weekly schedule
+    if 'Records' in event:  # Triggered by DynamoDB Stream
+        for record in event['Records']:
+            if record['eventName'] == 'INSERT':
+                new_record = record['dynamodb']['NewImage']
+                process_new_request(new_record)
     
-    # Step 1: Search in OpenSearch for matching products
+    elif event.get("TriggerType") == "weekly":  # Triggered by EventBridge
+        process_existing_requests()
+
+def process_new_request(new_record):
+    # Extract POSTCODE, ProductName, and PhoneNumber from the new record
+    postcode = new_record['POSTCODE']['S']
+    product_name = new_record['ProductName']['S']
+    phone_number = new_record.get('PhoneNumber', {}).get('S', None)
+
+    # Search OpenSearch for matching products
+    matched_products = search_product_in_opensearch(postcode, product_name)
+    
+    if matched_products and phone_number:
+        # Send notification to user if matched products found
+        notify_user(matched_products, phone_number)
+
+def process_existing_requests():
+    try:
+        # Scan DynamoDB for all user requests
+        response = user_requests_table.scan()
+        requests = response.get('Items', [])
+        
+        for request in requests:
+            postcode = request['POSTCODE']['S']
+            product_name = request['ProductName']['S']
+            phone_number = request.get('PhoneNumber', {}).get('S', None)
+            
+            # Search OpenSearch for matching products
+            matched_products = search_product_in_opensearch(postcode, product_name)
+            
+            if matched_products and phone_number:
+                # Send notification to user if matched products found
+                notify_user(matched_products, phone_number)
+                
+    except Exception as e:
+        print(f"Error processing existing requests: {e}")
+
+
+def search_product_in_opensearch(postcode, product_name):
     query = {
-    "query": {
-        "bool": {
-            "must": [
-                {"match": {"POSTCODE": postcode}},
-                {
-                    "fuzzy": {
-                        "ProductName": {
-                            "value": product_name,
-                            "fuzziness": "AUTO"  # Automatically determines the fuzziness level
+        "query": {
+            "bool": {
+                "must": [
+                    {"match": {"POSTCODE": postcode}},
+                    {
+                        "fuzzy": {
+                            "ProductName": {
+                                "value": product_name,
+                                "fuzziness": "AUTO"
+                            }
                         }
                     }
-                }
-            ]
+                ]
+            }
         }
     }
-    }
+
     response = client.search(
         body=query,
         index="product_catalog_index"
@@ -64,39 +108,17 @@ def lambda_handler(event, context):
     
     matched_products = []
     for hit in response['hits']['hits']:
-        # Extract POSTCODE and ProductName from the hit
-        postcode = hit['_source']['POSTCODE']
-        product_name = hit['_source']['ProductName']
-        
-        # Step 2: Retrieve full product details from DynamoDB
-        product_details = get_product_details_from_dynamodb(postcode=postcode,product_name=product_name)
-        if product_details:
-            matched_products.append(product_details)
+        product = hit['_source']
+        matched_products.append(product)
     
-    # Send a notification with full product details if matches found
-    if matched_products:
-        notify_user(matched_products, event['PhoneNumber'])
+    return matched_products
 
-def get_product_details_from_dynamodb(postcode, product_name):
-    try:
-        table = dynamodb.Table('ProductCatalogTable')
-        response = table.get_item(Key={'POSTCODE': postcode, 'ProductName': product_name})
-        if 'Item' in response:
-            return {
-                "POSTCODE": response['Item'].get('POSTCODE'),
-                "ProductName": response['Item'].get('ProductName')
-                #"reqoptiondesc and reqprice": response['Item'].get('Discount'),
-                #"Availability": response['Item'].get('Availability')
-            }
-    except Exception as e:
-        print(f"Error retrieving product details: {e}")
-    return None
 
 def notify_user(matched_products, phone_number):
     message = "Matched products:\n"
     for product in matched_products:
-        message += f"Product: {product['ProductName']}\n"
-
+        message += f"Product: {product['ProductName']}, Postcode: {product['POSTCODE']}\n"
+        
     sns.publish(
         PhoneNumber=phone_number,
         Message=message,

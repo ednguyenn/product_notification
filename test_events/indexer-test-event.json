@@ -1,0 +1,29 @@
+{
+    "Records": [
+      {
+        "eventID": "1",
+        "eventName": "INSERT",
+        "eventVersion": "1.1",
+        "eventSource": "aws:dynamodb",
+        "awsRegion": "us-east-1",
+        "dynamodb": {
+          "ApproximateCreationDateTime": 1620328327.0,
+          "Keys": {
+            "POSTCODE": {"S": "2000"},
+            "ProductName": {"S": "TestProduct"}
+          },
+          "NewImage": {
+            "POSTCODE": {"S": "2000"},
+            "ProductName": {"S": "TestProduct"},
+            "Discount": {"S": "10%"},
+            "Price": {"S": "$5"}
+          },
+          "SequenceNumber": "111",
+          "SizeBytes": 26,
+          "StreamViewType": "NEW_IMAGE"
+        },
+        "eventSourceARN": "arn:aws:dynamodb:us-east-1:123456789012:table/ProductCatalogTable/stream/2021-04-30T19:26:16.883"
+      }
+    ]
+  }
+  

@@ -67,38 +67,6 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref UserRequestsTable
 
-  # UniquePostcodeUpdaterFunction
-  UniquePostcodeUpdaterFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: src/unique_postcode_updater/
-      Handler: app.lambda_handler
-      Runtime: python3.9
-      Environment:
-        Variables:
-          UNIQUE_POSTCODES_TABLE: !Ref UniquePostcodesTable
-      Events:
-        UserRequestsTableStream:
-          Type: DynamoDB
-          Properties:
-            Stream: !GetAtt UserRequestsTable.StreamArn
-            StartingPosition: LATEST
-      Policies:
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - dynamodb:GetRecords
-                - dynamodb:GetShardIterator
-                - dynamodb:DescribeStream
-                - dynamodb:ListStreams
-              Resource: !Sub '${UserRequestsTable.StreamArn}'
-            - Effect: Allow
-              Action:
-                - dynamodb:GetItem
-                - dynamodb:PutItem
-              Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${UniquePostcodesTable}'
-
   # ScraperFunction
   ScraperFunction:
     Type: AWS::Serverless::Function
@@ -109,18 +77,8 @@ Resources:
       Timeout: 600
       Environment:
         Variables:
-          UNIQUE_POSTCODES_TABLE: UniquePostcodesTable
-      Events:
-        StreamTrigger:
-          Type: DynamoDB
-          Properties:
-            Stream: !GetAtt UniquePostcodesTable.StreamArn
-            StartingPosition: TRIM_HORIZON
-            BatchSize: 1
+          UNIQUE_POSTCODES_TABLE: !Ref UniquePostcodesTable
       Policies:
-        - DynamoDBStreamReadPolicy:
-            TableName: !Ref UniquePostcodesTable
-            StreamName: !GetAtt UniquePostcodesTable.StreamArn
         - DynamoDBCrudPolicy:
             TableName: !Ref ProductCatalogTable
         - AWSLambdaBasicExecutionRole
@@ -141,6 +99,7 @@ Resources:
       Environment:
         Variables:
           OPENSEARCH_ENDPOINT: !GetAtt OpenSearchDomain.DomainEndpoint
+          AWS_REGION: !Ref AWS::Region
       Policies:
         - Version: '2012-10-17'
           Statement:
@@ -157,34 +116,84 @@ Resources:
 
   # MatcherFunction
   MatcherFunction:
-    Type: AWS::Serverless::Function
+  Type: AWS::Serverless::Function
+  Properties:
+    CodeUri: src/matcher_function/
+    Handler: app.lambda_handler
+    Runtime: python3.9
+    Layers:
+      - !Ref OpenSearchLayer
+    Environment:
+      Variables:
+        USER_REQUESTS_TABLE: !Ref UserRequestsTable
+        OPENSEARCH_ENDPOINT: !GetAtt OpenSearchDomain.DomainEndpoint
+        SNS_TOPIC_ARN: !Ref NotificationsTopic
+    Policies:
+      - DynamoDBStreamReadPolicy:
+          TableName: !Ref UserRequestsTable
+      - SNSPublishMessagePolicy:
+          TopicName: !GetAtt NotificationsTopic.TopicName
+      - Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'es:ESHttp*'
+            Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${OpenSearchDomain}/*'
+    Events:
+      DynamoDBStream:
+        Type: DynamoDB
+        Properties:
+          Stream: !GetAtt UserRequestsTable.StreamArn
+          BatchSize: 1
+          StartingPosition: TRIM_HORIZON
+
+  TriggerScraperFunction:
+    Type: Custom::TriggerFunction
     Properties:
-      CodeUri: src/matcher_function/
-      Handler: app.lambda_handler
-      Runtime: python3.9
-      Layers:
-        - !Ref OpenSearchLayer
-      Environment:
-        Variables:
-          USER_REQUESTS_TABLE: !Ref UserRequestsTable
-          OPENSEARCH_ENDPOINT: !GetAtt OpenSearchDomain.DomainEndpoint
-          SNS_TOPIC_ARN: !Ref NotificationsTopic
+      ServiceToken: !GetAtt FunctionInvokeRole.Arn
+      FunctionName: !Ref ScraperFunction
+  
+  # Lambda execution role to invoke the ScraperFunction
+  FunctionInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
       Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref UserRequestsTable
-        - SNSPublishMessagePolicy:
-            TopicName: !GetAtt NotificationsTopic.TopicName
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - 'es:ESHttp*'
-              Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${OpenSearchDomain}/*'
-      Events:
-        MatchSchedule:
-          Type: Schedule
-          Properties:
-            Schedule: rate(1 day)
+        - PolicyName: InvokeFunctionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt ScraperFunction.Arn
+
+  WeeklyMatcherRule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: "cron(0 6 ? * 5 *)"  # Runs every Thursday at 6:00 UTC
+      Targets:
+        - Arn: !GetAtt MatcherFunction.Arn
+          Id: "WeeklyMatcherTrigger"
+          Input: "{\"TriggerType\": \"weekly\"}"
+      RoleArn: !GetAtt LambdaExecutionRole.Arn
+  
+  WeeklyScraperRule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: "cron(0 1 ? * 5 *)" 
+      Targets:
+        - Arn: !GetAtt ScraperFunction.Arn
+          Id: "WeeklyScraperTrigger"
+          Input: "{\"TriggerType\": \"weekly\"}"  
+      RoleArn: !GetAtt LambdaExecutionRole.Arn
+
 
   # DynamoDB Tables
   UserRequestsTable:
@@ -202,20 +211,6 @@ Resources:
           KeyType: HASH
         - AttributeName: ProductName
           KeyType: RANGE
-      StreamSpecification:
-        StreamViewType: NEW_IMAGE
-
-  UniquePostcodesTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: UniquePostcodesTable
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: POSTCODE
-          AttributeType: S
-      KeySchema:
-        - AttributeName: POSTCODE
-          KeyType: HASH
       StreamSpecification:
         StreamViewType: NEW_IMAGE
 
